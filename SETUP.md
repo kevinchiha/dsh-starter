@@ -314,7 +314,7 @@ Tick each one with the user:
 - [ ] `dsh web` answers a prompt on the default model
 - [ ] the Model list shows 11 Claude and 6 GPT entries (0 GPT if step 7 deleted the block; plus 4 DeepSeek rows that need their own key) and switching works
 - [ ] `dsh-model claude-sonnet-5` changes the default; `dsh-model claude-fable-5-1` puts it back
-- [ ] `dsh-phone` sends the link; it opens on the phone with the phone layout
+- [ ] `dsh-phone` sends the link; on the phone the conversation fills the screen and the sidebar slides in from the left (the web pack's phone layout)
 - [ ] the sidebar shows the task board and plugin manager, and no ssh panel
 - [ ] asking for `/grilling` on any idea starts the questioning
 - [ ] a subagent runs (ask "use a subagent to count the files in $STARTER")

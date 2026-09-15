@@ -17,9 +17,6 @@ importers:
       dsh-better-sidebar:
         specifier: 0.19.1
         version: 0.19.1
-      dsh-client-ui-mobile:
-        specifier: link:../../plugins/dsh-client-ui-mobile
-        version: link:../../plugins/dsh-client-ui-mobile
       dsh-context:
         specifier: 0.52.0
         version: 0.52.0

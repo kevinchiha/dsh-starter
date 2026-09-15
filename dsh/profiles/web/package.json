@@ -5,7 +5,6 @@
     "@dsh-external/workflow": "git+https://github.com/dsh-external/dsh_workflow.git#44b83c182aa02d1be8a0803e8446cb495f93cd8f",
     "@linxin666/dsh-web-all": "0.3.22",
     "dsh-better-sidebar": "0.19.1",
-    "dsh-client-ui-mobile": "link:../../plugins/dsh-client-ui-mobile",
     "dsh-context": "0.52.0",
     "dsh-context-doctor": "github:Zhenyu98/dsh-context-doctor#41d5c2e4bbe0611b7928c4007bb28545f7ace38f",
     "dsh-superpowers": "0.1.0"
@@ -17,7 +16,6 @@
         "@deepseek-ai/dsh-web-app",
         "@dsh-external/workflow",
         "dsh-superpowers",
-        "dsh-client-ui-mobile",
         "dsh-better-sidebar",
         "dsh-context",
         "dsh-context-doctor",
