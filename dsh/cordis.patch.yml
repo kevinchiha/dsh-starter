@@ -1,0 +1,42 @@
+# Home-level patch layer: preferences shared by every dsh profile.
+# Applied after each profile's own cordis.patch.yml.
+
+# Context7 (Upstash): looks up the CURRENT documentation for a named library instead of
+# trusting the model's memory of it. Two tools: mcp__context7__resolve-library-id turns a
+# name like "next.js" into an id, mcp__context7__get-library-docs fetches the docs.
+#
+# Hosted service over Streamable HTTP, so nothing is installed and no local process runs.
+# Works anonymously, rate-limited per IP. A free key from context7.com raises the limit;
+# to use one, export CONTEXT7_API_KEY and add:
+#     headers:
+#       Authorization: !!js `Bearer ${process.env.CONTEXT7_API_KEY}`
+# Send NO Authorization header when there is no key.
+#
+# Only 2 tool definitions, so this row is cheap. If the service is unreachable at boot,
+# dsh still starts and its tools simply do not appear.
+- insert:
+    - id: mcp-context7
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: context7
+        transport: streamable-http
+        url: https://mcp.context7.com/mcp?client=dsh
+
+# Cap every stored image at 2000 px on its long edge, so a long chat cannot be killed by
+# one wide screenshot.
+#
+# Anthropic accepts images up to 8000x8000, until a single request carries more than 20
+# image blocks. Past that count the per-image limit drops to 2000 px per side and applies
+# to EVERY image in the request, including ones from earlier turns. An image over the
+# limit comes back as
+#   400 invalid_request_error: ... At least one of the image dimensions exceed max allowed
+#   size for many-image requests: 2000 pixels
+# and because the whole history is resent on every turn, that chat then fails forever.
+# /compact does not rescue it.
+#
+# dsh's own default normalises to a TOTAL-pixel budget (2048*2048) and then a long-edge
+# cap of 8192, so a 2880x1400 screenshot is stored as-is and trips the many-image rule.
+# This row applies to images stored AFTER a restart.
+- id: attachment-local
+  config:
+    normalizedImageMaxDimension: 2000
