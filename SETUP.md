@@ -53,12 +53,19 @@ Debian's own package is too old. On Arch, `nodejs npm` goes in step 3's pacman l
 
 ## 3. Node and dsh
 
-If `node --version` prints 24.x, skip the first line.
+If `node --version` already prints 24.x, skip the distro block and go straight to
+`corepack enable`.
 
-Run:
+Run (Debian/Ubuntu):
 
-    (Debian) curl -fsSL https://deb.nodesource.com/setup_24.x | sudo bash - && sudo apt-get install -y nodejs
-    (Arch)   sudo pacman -S --needed nodejs npm
+    curl -fsSL https://deb.nodesource.com/setup_24.x | sudo bash - && sudo apt-get install -y nodejs
+
+Run (Arch):
+
+    sudo pacman -S --needed nodejs npm
+
+Then run, on either distro:
+
     corepack enable
     corepack prepare pnpm@11.7.0 --activate
     npm install -g @deepseek-ai/dsh@0.1.5-rc.1
@@ -81,16 +88,16 @@ Expected afterwards: `tailscale ip -4` prints an address like `100.x.y.z`.
 CLIProxyAPI is a small program that logs into the user's Claude or ChatGPT account once and
 then answers API requests locally, so dsh runs on the subscription instead of a metered key.
 
-First check the machine's CPU type.
-
-Run: `uname -m`
-Expected: `x86_64` means the amd64 tarball below is right. `aarch64` means swap
-`linux_amd64` for `linux_aarch64` in the download URL.
+The second line below reads the machine's CPU type and picks the matching tarball, so there
+is no URL to edit by hand. On anything other than a 64-bit Intel/AMD or ARM machine it prints
+`unsupported:` followed by the CPU type; stop there and tell the user, because the download
+on the next line would fail anyway.
 
 Run:
 
     mkdir -p ~/cliproxyapi && cd ~/cliproxyapi
-    curl -fsSL -o cpa.tar.gz https://github.com/router-for-me/CLIProxyAPI/releases/download/v7.3.3/CLIProxyAPI_7.3.3_linux_amd64.tar.gz
+    ARCH=$(uname -m); case "$ARCH" in x86_64) A=amd64;; aarch64) A=aarch64;; *) echo "unsupported: $ARCH"; false;; esac
+    curl -fsSL -o cpa.tar.gz "https://github.com/router-for-me/CLIProxyAPI/releases/download/v7.3.3/CLIProxyAPI_7.3.3_linux_$A.tar.gz"
     tar xzf cpa.tar.gz && rm cpa.tar.gz && ls
     cp $STARTER/cliproxyapi/config.yaml ~/cliproxyapi/config.yaml
     KEY=$(openssl rand -hex 24); sed -i "s/REPLACE_WITH_RANDOM_KEY/$KEY/" ~/cliproxyapi/config.yaml
@@ -152,7 +159,8 @@ Run:
     echo "$PATH" | tr : '\n' | grep -qx "$HOME/.local/bin" || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile
     dsh-model
 
-Expected: a list of models grouped by route, then `current default: claude-fable-5-1 on claude`.
+Expected: a list of models grouped by route, then the line
+`current default: claude-fable-5-1 on claude  (reasoning effort: xhigh)`.
 If it says `No module named yaml`, install the PyYAML package from step 2. The `chmod +x` is
 harmless; the files already arrive executable.
 
@@ -166,10 +174,16 @@ phone about long jobs. Tell the user:
 2. Open the new bot's chat and send it `/start`.
 3. Paste the token here.
 
-When you have the token, run (paste the token in place of TOKEN, nowhere else):
+When you have the token, run the block below (paste the token in place of TOKEN, nowhere
+else). Run it line by line and stop after the second line to check `CHAT`. Do not count on
+the shell stopping the block by itself, because `set -e` may not be on. If `CHAT` is empty,
+the second line printed
+`no messages yet: ask the user to open the bot chat and send /start, then run this line again`.
+Do not write the env file in that case. Ask the user to send `/start`, then run that line
+again.
 
     TOKEN='TOKEN'
-    CHAT=$(curl -s "https://api.telegram.org/bot$TOKEN/getUpdates" | python3 -c 'import json,sys; u=json.load(sys.stdin)["result"]; print(u[-1]["message"]["chat"]["id"])')
+    CHAT=$(curl -s "https://api.telegram.org/bot$TOKEN/getUpdates" | python3 -c 'import json,sys; r=json.load(sys.stdin).get("result",[]); sys.exit("no messages yet: ask the user to open the bot chat and send /start, then run this line again") if not r else print(r[-1]["message"]["chat"]["id"])')
     printf 'TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\n' "$TOKEN" "$CHAT" > ~/.config/telegram.env
     chmod 600 ~/.config/telegram.env
     curl -s -X POST "https://api.telegram.org/bot$TOKEN/sendMessage" -d chat_id="$CHAT" -d text="dsh setup: Telegram works"
@@ -178,8 +192,7 @@ When you have the token, run (paste the token in place of TOKEN, nowhere else):
 The token is now only in `~/.config/telegram.env` (mode 600). Never put it into a chat log
 or a commit.
 
-Expected: the user sees "dsh setup: Telegram works" on their phone. If `getUpdates` returns
-an empty result, the user has not sent `/start` yet.
+Expected: the user sees "dsh setup: Telegram works" on their phone.
 
 ## 10. Skills
 
@@ -199,19 +212,33 @@ videos to the agent):
 
 ## 11. First run
 
-Run: `dsh web`
-It prints a URL with a token and opens the browser. On the very first load a dialog titled
-"Internal Testing Notice" appears; click Continue.
+You cannot press keys in a browser, and you cannot press Ctrl-C in a server you started, so
+start the server in the background, hand the URL to the user, and stop it by its process id.
 
-Send "say hi". Expected: a greeting, with "Claude Fable 5.1" and "Xhigh" shown on the model
-button at the bottom right of the composer. The first reply can take a minute at Xhigh
-effort.
+Run:
+
+    dsh web --no-open --port 3080 > /tmp/dsh-web.log 2>&1 &
+    echo $! > /tmp/dsh-web.pid; sleep 10; grep -o 'http://127.0.0.1:3080/?token=[^ ]*' /tmp/dsh-web.log
+
+Give the user that URL to open in a browser (the token is what lets the browser in). Wait for
+them to say the page is up. On the very first load a dialog titled "Internal Testing Notice"
+appears; tell them to click Continue.
+
+Ask them to send "say hi". Expected: a greeting, with "Claude Fable 5.1" and "Xhigh" shown on
+the model button at the bottom right of the composer. The first reply can take a minute at
+Xhigh effort.
 
 The model picker is a two-level menu. The button at the bottom right of the composer opens
-two rows, "Model" and "Effort"; click "Model" to see the list. It shows 21 entries: 4
+two rows, "Model" and "Effort"; clicking "Model" shows the list. It has 21 entries: 4
 built-in DeepSeek rows (they come with dsh and need a DeepSeek API key, so ignore them or
-tell the user), 11 Claude, and 6 GPT (0 GPT if step 7 deleted the block). Stop the server
-with Ctrl-C.
+tell the user), 11 Claude, and 6 GPT (0 GPT if step 7 deleted the block). Walk the user
+through opening it and reading the count back to you.
+
+Then stop the server:
+
+    kill "$(cat /tmp/dsh-web.pid)"
+
+Expected: the URL line printed, the reply arrived, the kill returns silently.
 
 Then the phone. Tell the user to install Tailscale on the phone and sign into the same
 account. `dsh-phone` needs Tailscale connected (`tailscale ip -4` must print an address) and
