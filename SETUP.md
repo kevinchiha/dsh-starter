@@ -1,7 +1,7 @@
 # SETUP.md: install this dsh setup
 
 You are an AI coding agent installing this on your user's Linux machine. Work through the
-steps in order. Each step says what to run and what success looks like. Two steps are marked
+steps in order. Each step says what to run and what success looks like. Three steps are marked
 STOP: tell the user exactly what to do, then wait until they say it is done. Do not skip
 ahead past a STOP.
 
@@ -21,6 +21,10 @@ If the user already cloned it elsewhere, set `STARTER` to that path instead.
 Run: `uname -s; systemctl --user status >/dev/null && echo systemd-ok; cat /etc/os-release | head -2`
 Expected: `Linux`, `systemd-ok`, and the distro name. Note the distro; package names below
 are given for Debian/Ubuntu (apt) and Arch (pacman). Use the matching column.
+
+If `systemd-ok` is missing, you are probably in a container or switched user with `su`; the
+user session that runs services is absent. Log in as the user directly (console or ssh) and
+run the check again. Do not go on without it; step 5 needs it.
 
 ## 2. System packages
 
@@ -94,11 +98,20 @@ Run (with or without `sudo` as decided above):
 
 Expected: `0.1.5-rc.1` and `11.7.0`.
 
-## 4. Tailscale
+## 4. STOP: Tailscale
 
-Run: `curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up`
-`tailscale up` prints a login URL. Tell the user to open it and sign in.
-Expected afterwards: `tailscale ip -4` prints an address like `100.x.y.z`.
+Tailscale is the private network that lets the user's phone reach this machine. Install it,
+then start the login in the background so your shell does not hang waiting for it:
+
+    curl -fsSL https://tailscale.com/install.sh | sh
+    sudo tailscale up > /tmp/tailscale-up.log 2>&1 &
+    sleep 5; grep -o 'https://login\.tailscale\.com/[^[:space:]]*' /tmp/tailscale-up.log
+
+Tell the user to open that URL and sign in. Wait until they say it is done.
+
+Then run: `tailscale ip -4`
+Expected: an address like `100.x.y.z`. If it prints nothing, the login has not finished;
+ask the user to check the browser tab.
 
 ## 5. CLIProxyAPI
 
@@ -146,6 +159,9 @@ Expected: JSON that lists model ids; with a Claude login it contains ids startin
 with a ChatGPT login ids starting `gpt-`. An empty `data` list means no login finished; ask
 the user to run the login again.
 
+If curl prints nothing at all, the proxy is not running; see "The proxy does not answer" at
+the end of this guide.
+
 ## 7. dsh home folder
 
 Run:
@@ -192,30 +208,35 @@ If the user's shell is zsh or fish, put the same line in its own rc file instead
 ## 9. STOP: Telegram bot
 
 `dsh-phone` sends the phone link through Telegram, and the `telegram-notify` skill pings the
-phone about long jobs. Tell the user:
+phone about long jobs. The bot token is a secret, so the user writes it to the file
+themselves; you never see it in a command or a reply. Tell the user:
 
 1. In Telegram, open @BotFather, send `/newbot`, follow the prompts. It gives you a token
    that looks like `123456789:AAxxxxxxxx`.
 2. Open the new bot's chat and send it `/start`.
-3. Paste the token here.
+3. Create the file `~/.config/telegram.env` with one line, your token in place of the
+   example:
 
-When you have the token, run the block below (paste the token in place of TOKEN, nowhere
-else). Run it line by line and stop after the second line to check `CHAT`. Do not count on
-the shell stopping the block by itself, because `set -e` may not be on. If `CHAT` is empty,
-the second line printed
-`no messages yet: ask the user to open the bot chat and send /start, then run this line again`.
-Do not write the env file in that case. Ask the user to send `/start`, then run that line
-again.
+       TELEGRAM_BOT_TOKEN=your-token-here
 
-    TOKEN='TOKEN'
-    CHAT=$(curl -s "https://api.telegram.org/bot$TOKEN/getUpdates" | python3 -c 'import json,sys; r=json.load(sys.stdin).get("result",[]); sys.exit("no messages yet: ask the user to open the bot chat and send /start, then run this line again") if not r else print(r[-1]["message"]["chat"]["id"])')
-    printf 'TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\n' "$TOKEN" "$CHAT" > ~/.config/telegram.env
+   Any text editor works, or in a terminal (with your own token inside the quotes):
+   `mkdir -p ~/.config && printf 'TELEGRAM_BOT_TOKEN=%s\n' 'your-token-here' > ~/.config/telegram.env`
+4. Say "done".
+
+Wait for "done". Then run the block below line by line. The second line looks up the chat
+id (the number Telegram gives the conversation between the user and the bot). If it prints
+`no messages yet: ...`, the user has not sent `/start`; ask them to, run that line again,
+and do not go on until `CHAT` holds a number.
+
     chmod 600 ~/.config/telegram.env
+    TOKEN=$(sed -n 's/^TELEGRAM_BOT_TOKEN=//p' ~/.config/telegram.env)
+    CHAT=$(curl -s "https://api.telegram.org/bot$TOKEN/getUpdates" | python3 -c 'import json,sys; r=json.load(sys.stdin).get("result",[]); sys.exit("no messages yet: ask the user to open the bot chat and send /start, then run this line again") if not r else print(r[-1]["message"]["chat"]["id"])')
+    printf 'TELEGRAM_CHAT_ID=%s\n' "$CHAT" >> ~/.config/telegram.env
     curl -s -X POST "https://api.telegram.org/bot$TOKEN/sendMessage" -d chat_id="$CHAT" -d text="dsh setup: Telegram works"
-    unset TOKEN
+    unset TOKEN CHAT
 
-The token is now only in `~/.config/telegram.env` (mode 600). Never put it into a chat log
-or a commit.
+Append the chat id once. The file now has two lines and mode 600; `dsh-phone` and
+`telegram-notify` read it from there. Never print the token or paste it into a chat.
 
 Expected: the user sees "dsh setup: Telegram works" on their phone.
 
@@ -244,7 +265,10 @@ start the server in the background, hand the URL to the user, and stop it by its
 Run:
 
     dsh web --no-open --port 3080 > /tmp/dsh-web.log 2>&1 &
-    echo $! > /tmp/dsh-web.pid; sleep 10; grep -o 'http://127.0.0.1:3080/?token=[^ ]*' /tmp/dsh-web.log
+    echo $! > /tmp/dsh-web.pid
+    for i in $(seq 1 30); do URL=$(grep -o 'http://127.0.0.1:3080/?token=[^ ]*' /tmp/dsh-web.log) && break; sleep 1; done; echo "$URL"
+
+If it prints an empty line after 30 seconds, read `/tmp/dsh-web.log`; the error is there.
 
 Give the user that URL to open in a browser (the token is what lets the browser in). Wait for
 them to say the page is up. On the very first load a dialog titled "Internal Testing Notice"
@@ -286,7 +310,7 @@ instead.
 Tick each one with the user:
 
 - [ ] `dsh web` answers a prompt on the default model
-- [ ] the Model list shows 11 Claude and 6 GPT entries (plus 4 DeepSeek rows that need their own key) and switching works
+- [ ] the Model list shows 11 Claude and 6 GPT entries (0 GPT if step 7 deleted the block; plus 4 DeepSeek rows that need their own key) and switching works
 - [ ] `dsh-model claude-sonnet-5` changes the default; `dsh-model claude-fable-5-1` puts it back
 - [ ] `dsh-phone` sends the link; it opens on the phone with the phone layout
 - [ ] the sidebar shows the task board and plugin manager, and no ssh panel
@@ -300,7 +324,9 @@ The original setup also had a memory store, a self-hosted page fetcher, browser 
 and an API marketplace plugin (treg). They need services this guide does not set up. The
 design notes in `docs/specs/` say what each was. The four DeepSeek entries in the model
 picker come with dsh itself; they work only with a DeepSeek API key, which this guide does
-not set up.
+not set up. The ssh panel of the web pack is switched off in
+`dsh/profiles/web/cordis.patch.yml`; it is a remote-terminal feature this setup does not
+need, so its absence in the sidebar is correct.
 
 ## If something breaks
 
