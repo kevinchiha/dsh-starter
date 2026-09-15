@@ -1,0 +1,29 @@
+# Patch layer for this dsh profile, applied after every bundle layer.
+
+# @linxin666/dsh-web-all rows switched off. The pack already ships describe-image,
+# liangshen and doctor disabled; the lines below repeat them so the choice survives a
+# pack update that flips its defaults. Flip a row back with `disabled: false`.
+- id: web-ui-remote-web-ui   # phone pairing; dsh-phone covers this
+  disabled: true
+- id: web-ui-better-sidebar  # the pack's copy of dsh-better-sidebar; the real row is `better-sidebar`
+  disabled: true
+- id: web-ui-pet             # corner mascot
+  disabled: true
+- id: web-ui-i18n            # adds Russian to the language menu
+  disabled: true
+- id: web-ui-liangshen       # persona preset that rewrites tool delivery
+  disabled: true
+- id: web-ui-describe-image  # vision tool for text-only models; the Claude models take images
+  disabled: true
+- id: web-ui-doctor          # automatic profile repairs; you own these files
+  disabled: true
+
+# Ships off in the pack, wanted on.
+- id: web-ui-skill-explorer  # browse/enable/disable loaded skills from a panel
+  disabled: false
+
+# Ships off in the pack, LEFT OFF on purpose. It adds an ssh panel plus six agent tools
+# (ssh_exec, ssh_upload, ...) on every host you add, with no approval gate. Set
+# `disabled: false` if you want the agent running commands on your other machines.
+- id: web-ui-ssh
+  disabled: true

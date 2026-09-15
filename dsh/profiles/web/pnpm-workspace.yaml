@@ -1,0 +1,12 @@
+packages:
+  - .
+
+nodeLinker: hoisted
+autoInstallPeers: false
+allowBuilds:
+  node-pty: true
+  # Needed by @linxin666/dsh-web-all (ssh panel, cloudflared tunnel dep).
+  # They compile on install; without these lines pnpm refuses.
+  cloudflared: true
+  cpu-features: true
+  ssh2: true
