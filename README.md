@@ -22,6 +22,8 @@ or ChatGPT account in a browser, once to create a Telegram bot. Plan on about an
 - A Linux machine with systemd (any mainstream distro).
 - A Claude Pro/Max or ChatGPT Plus/Pro subscription. The proxy logs into it; there is no
   per-token bill.
+- Node 24. Step 3 of the guide installs it; Debian's own package is too old and Arch's
+  default is too new.
 - A C compiler and Node headers (`build-essential` on Debian/Ubuntu, `base-devel` on Arch):
   three plugins compile native code during install.
 - A phone with Telegram and Tailscale installed, if you want the phone part.

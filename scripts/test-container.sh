@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 
 # Set BUILD_ESSENTIAL=1 to add a C/C++ compiler to the image. Leave it unset to
 # find out whether the install needs one.
-APT_PACKAGES="curl git python3 python3-yaml python3-venv ffmpeg"
+APT_PACKAGES="curl git openssl python3 python3-yaml python3-venv ffmpeg"
 if [[ "${BUILD_ESSENTIAL:-0}" == "1" ]]; then
   APT_PACKAGES="$APT_PACKAGES build-essential"
 fi
@@ -31,17 +31,9 @@ apt-get install -y -qq $APT_PACKAGES >/dev/null
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash - >/dev/null
 apt-get install -y -qq nodejs >/dev/null
 
-# Pin pnpm to the version that wrote the lock file, so --frozen-lockfile
-# compares like with like.
-if corepack enable 2>/dev/null && corepack prepare pnpm@11.7.0 --activate >/dev/null 2>&1; then
-  echo "pnpm via corepack"
-else
-  echo "pnpm via npm (corepack refused)"
-  npm i -g pnpm@11.7.0 >/dev/null
-fi
-echo "node: $(node --version)  pnpm: $(pnpm --version)"
-
-npm i -g @deepseek-ai/dsh@0.1.5-rc.1 >/dev/null
+# The guide installs pnpm and dsh with one npm line; the test does the same.
+npm i -g pnpm@11.7.0 @deepseek-ai/dsh@0.1.5-rc.1 >/dev/null
+echo "node: $(node --version)  pnpm: $(pnpm --version)  dsh: $(dsh --version)"
 
 export DSH_HOME=/root/.dsh
 mkdir -p "$DSH_HOME" && cp -r /starter/dsh/. "$DSH_HOME/"
@@ -67,5 +59,6 @@ python3 -m venv /root/.agents/skills/youtube-fetcher/.venv
 
 dsh web --no-open --port 3098 > /tmp/web.log 2>&1 &
 sleep 15
+cat /tmp/web.log
 curl -s -o /dev/null -w 'dsh web: http %{http_code}\n' http://127.0.0.1:3098/
 EOF

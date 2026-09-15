@@ -25,9 +25,9 @@ Archive is the middle ground: `archive <id>` takes a card off the board without 
 
 | Thought | Reality |
 |---|---|
-| "He said clean up, that covers deleting" | It names an outcome, not a card. Delete needs a card. |
+| "The user said clean up, that covers deleting" | It names an outcome, not a card. Delete needs a card. |
 | "It's obviously a test card" | Test cards are the ones people forget they still need. Ask. |
-| "He's away and wanted it done now" | Do the create. Leave the delete list in the reply. |
+| "The user is away and wanted it done now" | Do the create. Leave the delete list in the reply. |
 | "I'll archive instead, that's not destructive" | Archive is allowed without asking. Say so in the reply. |
 
 ## Permission
