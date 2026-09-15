@@ -323,8 +323,8 @@ Tick each one with the user:
 ## Things left out on purpose
 
 The original setup also had a memory store, a self-hosted page fetcher, browser control,
-and an API marketplace plugin (treg). They need services this guide does not set up. The
-design notes in `docs/specs/` say what each was. The four DeepSeek entries in the model
+and an API marketplace plugin (treg). They need services this guide does not set up, so
+they are gone rather than half-working. The four DeepSeek entries in the model
 picker come with dsh itself; they work only with a DeepSeek API key, which this guide does
 not set up. The ssh panel of the web pack is switched off in
 `dsh/profiles/web/cordis.patch.yml`; it is a remote-terminal feature this setup does not

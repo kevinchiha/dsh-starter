@@ -38,7 +38,6 @@ or ChatGPT account in a browser, once to create a Telegram bot. Plan on about an
 | `skills/` | 18 skills the agent can invoke |
 | `scripts/` | the checks the author ran before publishing: leak grep, local install test, clean-machine container test |
 | `SETUP.md` | the guide |
-| `docs/` | the design notes behind this repo |
 
 ## Licences
 
