@@ -104,9 +104,10 @@ then start the login in the background so your shell does not hang waiting for i
     sudo tailscale up > /tmp/tailscale-up.log 2>&1 &
     for i in $(seq 1 30); do URL=$(grep -o 'https://login\.tailscale\.com/[^[:space:]]*' /tmp/tailscale-up.log) && break; sleep 1; done; echo "$URL"
 
-Expected: a login URL on the last line. If it is empty after 30 seconds, read
-`/tmp/tailscale-up.log`; the error is there. If the log says the machine is already logged
-in, there is nothing to open; go to the check below.
+Expected: a login URL on the last line. If it is empty after 30 seconds, run
+`tailscale ip -4`: an address means the machine was already logged in (`tailscale up` then
+prints nothing and exits), so skip to the check below. No address means it failed; read
+`/tmp/tailscale-up.log`, the error is there.
 
 Tell the user to open that URL and sign in. Wait until they say it is done.
 
