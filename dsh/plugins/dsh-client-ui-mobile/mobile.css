@@ -1,7 +1,7 @@
 /* dsh web GUI, phone layout: the sidebar as a hamburger drawer.
  *
  * Paste into Stylus (Firefox Android) or Userscripts (iOS Safari), scoped to
- * whichever host you open dsh on, e.g. http://100.66.185.10:8080
+ * whichever host you open dsh on, e.g. http://100.x.y.z:8080
  *
  * IMPORTANT, if you use this file rather than the plugin. Three behaviours need
  * a real event handler, which a userstyle cannot supply, so lib/client.js next
