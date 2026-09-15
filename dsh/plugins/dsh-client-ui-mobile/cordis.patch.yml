@@ -1,0 +1,5 @@
+# Adds one client-only plugin row to a dsh web composition.
+# `id` is the stable row identity; `name` must resolve as a package name.
+- insert:
+    - id: ui-mobile
+      name: dsh-client-ui-mobile
