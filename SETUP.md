@@ -324,7 +324,11 @@ Tick each one with the user:
 
 The original setup also had a memory store, a self-hosted page fetcher, browser control,
 and an API marketplace plugin (treg). They need services this guide does not set up, so
-they are gone rather than half-working. The four DeepSeek entries in the model
+they are gone rather than half-working. Two more plugins, an agent-team orchestrator
+(`@nanmicoder/dsh-agent-teams`) and a context-compression tool (`billion-context-dsh`),
+were dropped from this snapshot on 2026-09-15 because together they add ~13K tokens of
+tool definitions to every request and the built-in `subagent` and `workflow` tools cover
+the same ground. `dsh plugin --profile web add <name>` brings either back. The four DeepSeek entries in the model
 picker come with dsh itself; they work only with a DeepSeek API key, which this guide does
 not set up. The ssh panel of the web pack is switched off in
 `dsh/profiles/web/cordis.patch.yml`; it is a remote-terminal feature this setup does not
