@@ -1,0 +1,11 @@
+[Unit]
+Description=CLIProxyAPI (local OAuth proxy for Claude and ChatGPT subscriptions)
+After=network-online.target
+
+[Service]
+ExecStart=%h/cliproxyapi/cli-proxy-api -config %h/cliproxyapi/config.yaml
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
