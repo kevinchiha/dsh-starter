@@ -5,9 +5,9 @@ steps in order. Each step says what to run and what success looks like. Two step
 STOP: tell the user exactly what to do, then wait until they say it is done. Do not skip
 ahead past a STOP.
 
-Step 0 sets the shell variable `$STARTER` to the clone folder. Every later step uses it. If
-you run each command in a fresh shell, set `STARTER` again at the top of every step; the
-variable does not survive between shells.
+Step 0 sets the shell variable `$STARTER` to the clone folder. Every block that uses it
+starts with a line that defaults it to `~/dsh-starter` when unset, so a fresh shell per step
+is fine. If the clone is somewhere else, set `STARTER` to that path before each block.
 
 ## 0. Clone
 
@@ -30,52 +30,69 @@ Install, with the distro's package manager:
 |---|---|---|
 | `curl` | `curl` | downloads |
 | `git` | `git` | clone |
+| `openssl` | `openssl` | step 5 makes a random proxy key with it |
 | `python3` | `python` | the two scripts |
 | `python3-yaml` | `python-yaml` | `dsh-model` reads settings.yaml |
 | `python3-venv` | included in `python` | `youtube-fetcher`'s own Python env |
 | `ffmpeg` | `ffmpeg` | `watch` skill (frames from video) |
 | `build-essential` | `base-devel` | three plugins compile C++ during `pnpm install` |
-| `nodejs` | `nodejs npm` | see step 3, not from Debian's repo |
+| `nodejs` | `nodejs-lts-krypton npm` | see step 3; Debian's own package is too old, Arch's default is too new |
 | `socat` | `socat` | `dsh-phone` forwards the tailnet port |
 | `qrencode` | `qrencode` | optional: `dsh-phone` prints a QR code in the terminal if present |
 | `yt-dlp` | `yt-dlp` | `watch` and `youtube-fetcher` download videos; optional |
 
 Run (Debian/Ubuntu):
 
-    sudo apt-get install -y curl git python3 python3-yaml python3-venv ffmpeg build-essential socat qrencode yt-dlp
+    sudo apt-get install -y curl git openssl python3 python3-yaml python3-venv ffmpeg build-essential socat qrencode yt-dlp
 
 Run (Arch):
 
-    sudo pacman -S --needed curl git python python-yaml ffmpeg base-devel socat qrencode yt-dlp
+    sudo pacman -S --needed curl git openssl python python-yaml ffmpeg base-devel socat qrencode yt-dlp
 
 The apt line leaves out `nodejs` on purpose: step 3 installs it from nodesource, because
-Debian's own package is too old. On Arch, `nodejs npm` goes in step 3's pacman line.
+Debian's own package is too old. On Arch, `nodejs-lts-krypton npm` goes in step 3's pacman line.
 
 ## 3. Node and dsh
 
-If `node --version` already prints 24.x, skip the distro block and go straight to
-`corepack enable`.
+Run `node --version` first.
+
+- Prints `v24.x`: skip the distro block, go to the install line.
+- Prints nothing: run the distro block.
+- Prints any other major version: stop and tell the user. dsh was tested on Node 24 only.
+  Replacing a Node that another tool depends on is their call, not yours.
 
 Run (Debian/Ubuntu):
 
     curl -fsSL https://deb.nodesource.com/setup_24.x | sudo bash - && sudo apt-get install -y nodejs
 
+If the nodesource script says the distro is unsupported, tell the user; the Linux tarball
+from https://nodejs.org/en/download unpacked into `/usr/local` works too. This guide was
+tested with the script on Debian 13.
+
 Run (Arch):
 
-    sudo pacman -S --needed nodejs npm
+    sudo pacman -S --needed nodejs-lts-krypton npm
 
-Then run, on either distro:
+`nodejs-lts-krypton` is Arch's name for Node 24; plain `nodejs` there is a newer major.
 
-    corepack enable
-    corepack prepare pnpm@11.7.0 --activate
-    npm install -g @deepseek-ai/dsh@0.1.5-rc.1
+Then install pnpm and dsh. `pnpm` is the package manager dsh uses to install its plugins;
+the version is pinned because the lock file in this repo was written with pnpm 11.7.0 and
+step 7 installs with `--frozen-lockfile`. Whether the line needs `sudo` depends on where
+Node lives:
+
+    command -v node
+
+- Path starts with `/usr` (distro package): run with `sudo`.
+- Path starts with `/home` (a version manager such as nvm or mise): run without `sudo`;
+  with it, root's shell cannot find node.
+
+Run (with or without `sudo` as decided above):
+
+    sudo npm install -g pnpm@11.7.0 @deepseek-ai/dsh@0.1.5-rc.1
     dsh --version
     pnpm --version
 
-Expected: `dsh --version` prints `0.1.5-rc.1` and `pnpm --version` prints `11.7.0`.
-`corepack enable` gives you `pnpm`, which dsh uses to install plugins. The version is pinned
-because the lock file in this repo was written with pnpm 11.7.0 and step 7 installs with
-`--frozen-lockfile`.
+Expected: `0.1.5-rc.1` and `11.7.0`.
 
 ## 4. Tailscale
 
@@ -95,6 +112,7 @@ on the next line would fail anyway.
 
 Run:
 
+    STARTER=${STARTER:-$HOME/dsh-starter}
     mkdir -p ~/cliproxyapi && cd ~/cliproxyapi
     ARCH=$(uname -m); case "$ARCH" in x86_64) A=amd64;; aarch64) A=aarch64;; *) echo "unsupported: $ARCH"; false;; esac
     curl -fsSL -o cpa.tar.gz "https://github.com/router-for-me/CLIProxyAPI/releases/download/v7.3.3/CLIProxyAPI_7.3.3_linux_$A.tar.gz"
@@ -117,6 +135,7 @@ finish the login there. Wait for the user to say it is done.
 
 Then run:
 
+    STARTER=${STARTER:-$HOME/dsh-starter}
     KEY=$($STARTER/bin/cliproxyapi-key)
     curl -s -H "Authorization: Bearer $KEY" http://127.0.0.1:8317/v1/models | head -c 400
 
@@ -131,6 +150,7 @@ the user to run the login again.
 
 Run:
 
+    STARTER=${STARTER:-$HOME/dsh-starter}
     mkdir -p ~/.dsh && cp -r $STARTER/dsh/. ~/.dsh/
     printf 'version: 1\nrefs:\n  CLIPROXYAPI_KEY: %s\n' "$($STARTER/bin/cliproxyapi-key)" > ~/.dsh/.credentials.yaml
     chmod 600 ~/.dsh/.credentials.yaml
@@ -155,14 +175,19 @@ the picker and fail. The comment above the block says the same.
 
 Run:
 
+    STARTER=${STARTER:-$HOME/dsh-starter}
     mkdir -p ~/.local/bin && cp $STARTER/bin/* ~/.local/bin/ && chmod +x ~/.local/bin/{dsh-phone,dsh-model,cliproxyapi-key,yt-md}
     echo "$PATH" | tr : '\n' | grep -qx "$HOME/.local/bin" || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile
+    export PATH="$HOME/.local/bin:$PATH"
     dsh-model
 
 Expected: a list of models grouped by route, then the line
 `current default: claude-fable-5-1 on claude  (reasoning effort: xhigh)`.
 If it says `No module named yaml`, install the PyYAML package from step 2. The `chmod +x` is
 harmless; the files already arrive executable.
+
+The `export PATH` line is for this shell; the `~/.profile` line is for the user's next login.
+If the user's shell is zsh or fish, put the same line in its own rc file instead.
 
 ## 9. STOP: Telegram bot
 
@@ -198,6 +223,7 @@ Expected: the user sees "dsh setup: Telegram works" on their phone.
 
 Run:
 
+    STARTER=${STARTER:-$HOME/dsh-starter}
     mkdir -p ~/.agents && cp -r $STARTER/skills/. ~/.agents/skills/
     ls ~/.agents/skills | wc -l
 
@@ -244,7 +270,11 @@ Then the phone. Tell the user to install Tailscale on the phone and sign into th
 account. `dsh-phone` needs Tailscale connected (`tailscale ip -4` must print an address) and
 `socat` installed; without either it exits with a one-line error.
 
-Run: `dsh-phone`
+Run:
+
+    export PATH="$HOME/.local/bin:$PATH"
+    dsh-phone
+
 Expected: a Telegram message with a link. The link is a tailnet URL, so only the user's own
 Tailscale devices can open it. The user opens it on the phone; the page shows the phone
 layout. `dsh-phone --stop` shuts it down; `dsh-phone --status` shows how long is left. For a
