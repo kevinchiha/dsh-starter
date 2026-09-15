@@ -81,22 +81,19 @@ Run (Arch):
 
 Then install pnpm and dsh. `pnpm` is the package manager dsh uses to install its plugins;
 the version is pinned because the lock file in this repo was written with pnpm 11.7.0 and
-step 7 installs with `--frozen-lockfile`. Whether the line needs `sudo` depends on where
-Node lives:
+step 7 installs with `--frozen-lockfile`. Whether the install needs `sudo` depends on where
+Node lives: a distro package puts it under `/usr`, where only root can write, and a version
+manager such as nvm or mise puts it under `/home`, where `sudo` breaks the install because
+root's shell cannot find node. The first line below checks the path and picks for you.
 
-    command -v node
+Run:
 
-- Path starts with `/usr` (distro package): run with `sudo`.
-- Path starts with `/home` (a version manager such as nvm or mise): run without `sudo`;
-  with it, root's shell cannot find node.
-
-Run (with or without `sudo` as decided above):
-
-    sudo npm install -g pnpm@11.7.0 @deepseek-ai/dsh@0.1.5-rc.1
+    case "$(command -v node)" in /usr/*) SUDO=sudo;; *) SUDO=;; esac; echo "sudo: ${SUDO:-no}"
+    $SUDO npm install -g pnpm@11.7.0 @deepseek-ai/dsh@0.1.5-rc.1
     dsh --version
     pnpm --version
 
-Expected: `0.1.5-rc.1` and `11.7.0`.
+Expected: `sudo: sudo` or `sudo: no` on the first line, then `0.1.5-rc.1` and `11.7.0`.
 
 ## 4. STOP: Tailscale
 
@@ -105,7 +102,11 @@ then start the login in the background so your shell does not hang waiting for i
 
     curl -fsSL https://tailscale.com/install.sh | sh
     sudo tailscale up > /tmp/tailscale-up.log 2>&1 &
-    sleep 5; grep -o 'https://login\.tailscale\.com/[^[:space:]]*' /tmp/tailscale-up.log
+    for i in $(seq 1 30); do URL=$(grep -o 'https://login\.tailscale\.com/[^[:space:]]*' /tmp/tailscale-up.log) && break; sleep 1; done; echo "$URL"
+
+Expected: a login URL on the last line. If it is empty after 30 seconds, read
+`/tmp/tailscale-up.log`; the error is there. If the log says the machine is already logged
+in, there is nothing to open; go to the check below.
 
 Tell the user to open that URL and sign in. Wait until they say it is done.
 
@@ -214,8 +215,8 @@ themselves; you never see it in a command or a reply. Tell the user:
 1. In Telegram, open @BotFather, send `/newbot`, follow the prompts. It gives you a token
    that looks like `123456789:AAxxxxxxxx`.
 2. Open the new bot's chat and send it `/start`.
-3. Create the file `~/.config/telegram.env` with one line, your token in place of the
-   example:
+3. Create the file `~/.config/telegram.env` with one line. Put the token from point 1 (the
+   `123456789:AAxxxxxxxx`-shaped one) in place of `your-token-here`:
 
        TELEGRAM_BOT_TOKEN=your-token-here
 
