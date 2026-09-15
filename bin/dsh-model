@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""Show or change the model dsh starts new agents on.
+
+Reads the routes declared in ~/.dsh/settings.yaml (all of which point at the
+local CLIProxyAPI) and rewrites only the agent-default-model block, so the
+comments in that file survive.
+
+  dsh-model                  list every model, marking the current default
+  dsh-model claude-sonnet-5  switch to that model
+  dsh-model gpt-5.5 high     switch and set the reasoning effort
+  dsh-model anthropic/claude-haiku-4-5-20251001   disambiguate by route
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import yaml
+
+SETTINGS = Path.home() / ".dsh" / "settings.yaml"
+EFFORT_ORDER = ["max", "xhigh", "high", "medium", "low", "minimal", "off"]
+
+
+def load():
+    text = SETTINGS.read_text()
+    return text, yaml.safe_load(text)
+
+
+def routes(doc):
+    return (doc.get("llm-pi-ai") or {}).get("providers") or {}
+
+
+def current(doc):
+    sel = doc.get("agent-default-model") or {}
+    return sel.get("provider"), sel.get("model"), sel.get("reasoningEffort")
+
+
+def declared_efforts(entry):
+    """Effort levels a hand-declared entry offers; empty when the catalog owns them."""
+    efforts = entry.get("reasoningEfforts")
+    if not isinstance(efforts, dict):
+        return []
+    names = []
+    for key in efforts:
+        names.append("off" if key is False else str(key))
+    return names
+
+
+def catalog_names():
+    """Display names pi-ai ships, so catalog models are not listed bare.
+
+    Best effort: the path moves with the node version, and a miss just means
+    the listing shows ids alone.
+    """
+    dsh = shutil.which("dsh")
+    if not dsh:
+        return {}
+    tail = "node_modules/@earendil-works/pi-ai/dist/providers"
+    for base in Path(os.path.realpath(dsh)).parents:
+        providers = base / tail
+        if providers.is_dir():
+            break
+    else:
+        return {}
+    script = """
+const fs = require('node:fs');
+const dir = process.argv[1];
+const out = {};
+Promise.all(fs.readdirSync(dir)
+  .filter(f => f.endsWith('.models.js'))
+  .map(f => import('file://' + dir + '/' + f)
+    .then(m => { for (const c of Object.values(m))
+      if (c && typeof c === 'object')
+        for (const [id, e] of Object.entries(c)) if (e && e.name) out[id] = e.name; })
+    .catch(() => {})))
+  .then(() => console.log(JSON.stringify(out)));
+"""
+    try:
+        done = subprocess.run(
+            ["node", "-e", script, str(providers)],
+            capture_output=True, text=True, timeout=15,
+        )
+        return json.loads(done.stdout)
+    except Exception:
+        return {}
+
+
+def show(doc):
+    cur_provider, cur_model, cur_effort = current(doc)
+    names = catalog_names()
+    for route, cfg in routes(doc).items():
+        label = cfg.get("displayName", route)
+        print(f"\n{label}  [{route}]")
+        for entry in cfg.get("models") or []:
+            mid = entry["id"]
+            mark = "*" if (route == cur_provider and mid == cur_model) else " "
+            name = entry.get("name") or names.get(mid, "")
+            print(f"  {mark} {mid:<32} {name}".rstrip())
+    effort = f"  (reasoning effort: {cur_effort})" if cur_effort else ""
+    print(f"\ncurrent default: {cur_model} on {cur_provider}{effort}")
+    print("switch with: dsh-model <model-id> [effort]")
+
+
+def find(doc, wanted):
+    route_filter, _, model_id = wanted.rpartition("/")
+    hits = []
+    for route, cfg in routes(doc).items():
+        if route_filter and route != route_filter:
+            continue
+        for entry in cfg.get("models") or []:
+            if entry["id"] == model_id:
+                hits.append((route, entry))
+    return model_id, hits
+
+
+def write(text, provider, model, effort):
+    block = f"agent-default-model:\n  provider: {provider}\n  model: {model}\n"
+    if effort:
+        block += f"  reasoningEffort: {effort}\n"
+    new, count = re.subn(
+        r"^agent-default-model:\n(?:[ \t]+\S.*\n|[ \t]*\n)*",
+        block,
+        text,
+        count=1,
+        flags=re.M,
+    )
+    if count != 1:
+        sys.exit("dsh-model: could not find the agent-default-model block in " f"{SETTINGS}")
+    SETTINGS.write_text(new)
+    SETTINGS.chmod(0o600)
+
+
+def main():
+    text, doc = load()
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        show(doc)
+        return
+
+    model_id, hits = find(doc, args[0])
+    if not hits:
+        print(f"dsh-model: no route serves '{model_id}'", file=sys.stderr)
+        show(doc)
+        sys.exit(1)
+    if len(hits) > 1:
+        names = ", ".join(f"{route}/{model_id}" for route, _ in hits)
+        sys.exit(f"dsh-model: '{model_id}' is on several routes; name one of {names}")
+
+    route, entry = hits[0]
+    if len(args) > 1:
+        effort = args[1]
+    else:
+        offered = declared_efforts(entry)
+        effort = next((e for e in EFFORT_ORDER if e in offered), None)
+
+    write(text, route, model_id, effort)
+    suffix = f" at effort {effort}" if effort else ""
+    print(f"dsh now starts on {model_id} ({route}){suffix}")
+
+
+if __name__ == "__main__":
+    main()

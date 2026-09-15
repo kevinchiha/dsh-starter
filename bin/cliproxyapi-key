@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Print the client API key for the local CLIProxyAPI (127.0.0.1:8317).
+# Reads the first entry under `api-keys:` in ~/cliproxyapi/config.yaml at
+# run time, so tools can fetch it via a command instead of storing a copy.
+# Same sed as claude-rotate; used by ocr (open-code-review) via api_key_cmd.
+set -euo pipefail
+
+CONFIG="${CLIPROXYAPI_CONFIG:-$HOME/cliproxyapi/config.yaml}"
+
+[[ -r "$CONFIG" ]] || { echo "cliproxyapi-key: cannot read $CONFIG" >&2; exit 1; }
+
+KEY=$(sed -n '/^api-keys:/{n;s/^[[:space:]]*-[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}.*/\1/p;}' "$CONFIG")
+
+[[ -n "$KEY" ]] || { echo "cliproxyapi-key: no api-keys entry in $CONFIG" >&2; exit 1; }
+
+printf '%s\n' "$KEY"

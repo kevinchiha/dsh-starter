@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Wrapper for the youtube-fetcher skill: runs it with its own bundled Python.
+SKILL_DIR="$HOME/.agents/skills/youtube-fetcher"
+exec "$SKILL_DIR/.venv/bin/python" "$SKILL_DIR/scripts/fetch_transcript.py" "$@"

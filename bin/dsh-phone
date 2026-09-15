@@ -1,0 +1,487 @@
+#!/usr/bin/env python3
+"""Start dsh web and put it on your phone, addressed by Tailscale IP.
+
+dsh only ever listens on localhost, on purpose. This forwards your machine's
+Tailscale address to it, allows that address through dsh's host check, then
+prints a QR code of the phone link and sends the same link to Telegram.
+
+It detaches by default, so you can start it from a phone SSH app and close the
+app. Nothing else will ever stop it: dsh web has no idle timeout of any kind, so
+this owns that job through --ttl.
+
+  dsh-phone                 start in the current directory, detached
+  dsh-phone --foreground    hold the terminal and stream the log (old behaviour)
+  dsh-phone --status        print the live link, and how long is left
+  dsh-phone --status -t     also re-send the link to Telegram
+  dsh-phone --stop          stop dsh and close the forward
+  dsh-phone --ttl 0         never auto-stop (for a long unattended job)
+  dsh-phone --port 3081     run dsh on another port
+"""
+import argparse
+import json
+import os
+import re
+import signal
+import socket
+import subprocess
+import sys
+import threading
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+import urllib.request
+
+URL_LINE = re.compile(r"http://127\.0\.0\.1:(\d+)/\?token=([A-Za-z0-9_-]+)")
+STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "dsh-phone"
+STATE = STATE_DIR / "state.json"
+LOG = STATE_DIR / "dsh-phone.log"
+# How long a Telegram message holding a live link may sit in the chat.
+TELEGRAM_TTL_S = 15 * 60
+# How often the supervisor checks the deadline and whether a browser is attached.
+WATCH_INTERVAL_S = 30
+
+
+# --------------------------------------------------------------------- host --
+
+def tailnet():
+    """This machine's tailnet address and its short and full names."""
+    ip = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True,
+                        timeout=30).stdout.strip().splitlines()
+    if not ip:
+        sys.exit("dsh-phone: tailscale has no address for this machine; is it connected?")
+    status = subprocess.run(["tailscale", "status", "--json"], capture_output=True,
+                            text=True, timeout=30)
+    full = (json.loads(status.stdout).get("Self") or {}).get("DNSName", "").rstrip(".")
+    return ip[0], full.split(".")[0] if full else "", full
+
+
+def clear_stale_forward(ip, port):
+    """Kill a forward left behind by an earlier run; it would hold the port."""
+    out = subprocess.run(["pgrep", "-af", "socat"], capture_output=True, text=True).stdout
+    for line in out.splitlines():
+        pid, _, cmd = line.partition(" ")
+        if f"TCP-LISTEN:{port},bind={ip}" in cmd and pid.isdigit():
+            os.kill(int(pid), signal.SIGTERM)
+            time.sleep(0.5)
+            return True
+    return False
+
+
+def port_holder(port):
+    """Describe whatever already listens on a loopback port, so the clash is legible."""
+    out = subprocess.run(["ss", "-ltnp"], capture_output=True, text=True).stdout
+    for line in out.splitlines():
+        if f"127.0.0.1:{port} " in line or f"127.0.0.1:{port}\t" in line:
+            return line.strip()
+    return ""
+
+
+def serve_route_on(port):
+    """Whether tailscale serve already owns this tailnet port."""
+    out = subprocess.run(["tailscale", "serve", "status"], capture_output=True,
+                         text=True, timeout=30).stdout
+    return f":{port}" in out
+
+
+def browsers_attached(port):
+    """Count established connections to the tailnet port.
+
+    This is the activity signal behind --ttl. dsh web holds one WebSocket per open
+    browser, so a phone with the tab open keeps a connection here even while nobody
+    types, and a phone that walked away does not.
+    """
+    out = subprocess.run(["ss", "-tnH", "state", "established", f"sport = :{port}"],
+                         capture_output=True, text=True).stdout
+    return len([l for l in out.splitlines() if l.strip()])
+
+
+# ----------------------------------------------------------------- telegram --
+
+def _telegram_env():
+    env = {}
+    path = Path.home() / ".config/telegram.env"
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            env[k.strip()] = v.strip()
+    return env
+
+
+def _telegram_call(method, payload):
+    env = _telegram_env()
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{env['TELEGRAM_BOT_TOKEN']}/{method}",
+        data=json.dumps({"chat_id": env["TELEGRAM_CHAT_ID"], **payload}).encode(),
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def telegram_send(text):
+    """Send, and return the message id so it can be deleted later."""
+    return (_telegram_call("sendMessage", {"text": text, "disable_web_page_preview": True})
+            .get("result", {}).get("message_id"))
+
+
+def telegram_delete(message_id):
+    try:
+        _telegram_call("deleteMessage", {"message_id": message_id})
+        return True
+    except Exception:
+        return False
+
+
+def link_message(url, host, ttl_h):
+    stamp = datetime.now().strftime("%H:%M")
+    stop = (f"It stops itself after {ttl_h:g}h with nothing attached."
+            if ttl_h else "It runs until you stop it.")
+    return (f"dsh web is up on {host} ({stamp}). Open on this phone, Tailscale on:\n\n"
+            f"{url}\n\n"
+            f"This replaces any earlier link from {host}; older ones stop working. {stop} "
+            f"This message deletes itself in 15 minutes.")
+
+
+# -------------------------------------------------------------------- state --
+
+def read_state():
+    try:
+        return json.loads(STATE.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def write_state(**fields):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    state = read_state() or {}
+    state.update(fields)
+    tmp = STATE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, indent=2))
+    tmp.chmod(0o600)            # it holds the session token
+    tmp.replace(STATE)
+    return state
+
+
+def alive(pid):
+    if not isinstance(pid, int):
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def live_state():
+    """State for a supervisor that is really running, or None (clearing a stale file)."""
+    state = read_state()
+    if state and alive(state.get("supervisor")):
+        return state
+    if state:
+        STATE.unlink(missing_ok=True)
+    return None
+
+
+def qr(url):
+    try:
+        subprocess.run(["qrencode", "-t", "UTF8", "-m", "1", url], timeout=20)
+    except (FileNotFoundError, subprocess.SubprocessError):
+        pass
+
+
+def ago(seconds):
+    return str(timedelta(seconds=int(max(0, seconds)))).split(".")[0]
+
+
+# -------------------------------------------------------------- subcommands --
+
+def do_status(resend):
+    state = live_state()
+    if not state:
+        print("dsh-phone: nothing running")
+        return 1
+    print(f"host:     {state['host']}")
+    print(f"link:     {state.get('url', '(not printed yet)')}")
+    print(f"started:  {datetime.fromtimestamp(state['started']):%Y-%m-%d %H:%M}"
+          f"  ({ago(time.time() - state['started'])} ago)")
+    print(f"dir:      {state.get('cwd', '?')}")
+    attached = browsers_attached(state["tailnet_port"])
+    print(f"browsers: {attached}")
+    if state.get("ttl_h"):
+        note = " (held open while a browser is attached)" if attached else ""
+        print(f"ttl:      {state['ttl_h']:g}h idle, stops in "
+              f"{ago(state['deadline'] - time.time())}{note}")
+    else:
+        print("ttl:      none, runs until stopped")
+    if resend:
+        if not state.get("url"):
+            print("no link to send yet", file=sys.stderr)
+            return 1
+        try:
+            mid = telegram_send(link_message(state["url"], state["host"], state.get("ttl_h")))
+            write_state(telegram_mid=mid, telegram_sent=time.time())
+            print("link re-sent to Telegram")
+        except Exception as err:
+            print(f"telegram failed: {err}", file=sys.stderr)
+            return 1
+    return 0
+
+
+def do_stop():
+    state = live_state()
+    if not state:
+        print("dsh-phone: nothing running")
+        return 1
+    os.kill(state["supervisor"], signal.SIGTERM)
+    for _ in range(60):                        # the supervisor clears the state file
+        time.sleep(0.25)
+        if not STATE.exists():
+            print("dsh-phone: stopped")
+            return 0
+    print("dsh-phone: supervisor did not exit cleanly; killing what is left", file=sys.stderr)
+    for key in ("dsh", "socat", "supervisor"):
+        if alive(state.get(key)):
+            try:
+                os.kill(state[key], signal.SIGKILL)
+            except OSError:
+                pass
+    STATE.unlink(missing_ok=True)
+    return 1
+
+
+def do_start_detached(args):
+    """Re-exec self as a supervisor in its own session, then wait for the link."""
+    if live_state():
+        print("dsh-phone: already running. --status for the link, --stop to stop it.",
+              file=sys.stderr)
+        return 1
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    STATE.unlink(missing_ok=True)
+    log = open(LOG, "a")
+    log.write(f"\n===== {datetime.now():%Y-%m-%d %H:%M:%S} starting in {os.getcwd()} =====\n")
+    log.flush()
+    cmd = [sys.executable, os.path.abspath(__file__), "--supervise",
+           "--port", str(args.port), "--tailnet-port", str(args.tailnet_port),
+           "--ttl", str(args.ttl)]
+    if args.no_telegram:
+        cmd.append("--no-telegram")
+    subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                     start_new_session=True, cwd=os.getcwd())
+
+    for _ in range(240):                       # dsh takes a few seconds to print its URL
+        time.sleep(0.5)
+        state = read_state()
+        if state and state.get("error"):
+            print(f"dsh-phone: {state['error']}", file=sys.stderr)
+            STATE.unlink(missing_ok=True)
+            return 1
+        if state and state.get("url"):
+            print(f"\nphone: {state['url']}\n", flush=True)
+            qr(state["url"])
+            if state.get("telegram_mid"):
+                print("link sent to Telegram, deletes itself in 15 minutes")
+            elif not args.no_telegram:
+                print("telegram send failed, see the log", file=sys.stderr)
+            print("\nrunning detached. --status for the link, --stop to stop it.")
+            print(f"log: {LOG}")
+            return 0
+    print(f"dsh-phone: no link after two minutes. Check {LOG}", file=sys.stderr)
+    return 1
+
+
+# ------------------------------------------------------------------ runners --
+
+def resolve_host(args):
+    ip, short, full = tailnet()
+    trusted = [f"{ip}:{args.tailnet_port}"]
+    if short:
+        trusted += [f"{short}:{args.tailnet_port}", f"{full}:{args.tailnet_port}"]
+    return ip, (short or socket.gethostname()), trusted
+
+
+def start_processes(args, ip, trusted):
+    """Bring up the forward and dsh. Raises RuntimeError with a legible reason."""
+    held = port_holder(args.port)
+    if held:
+        raise RuntimeError(f"something already listens on 127.0.0.1:{args.port}: {held}. "
+                           f"Stop it, or use --port")
+
+    # The forward comes first: without it the link is useless, and a link that
+    # cannot work is worse than an error.
+    clear_stale_forward(ip, args.tailnet_port)
+    forward = subprocess.Popen(
+        ["socat", f"TCP-LISTEN:{args.tailnet_port},bind={ip},fork,reuseaddr",
+         f"TCP:127.0.0.1:{args.port}"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    time.sleep(1)
+    if forward.poll() is not None:
+        err = (forward.stderr.read() or "").strip().splitlines()
+        detail = "; ".join(err[-2:])
+        if any("Address already in use" in d for d in err) and serve_route_on(args.tailnet_port):
+            detail += (f". tailscale serve already owns port {args.tailnet_port}; close it with "
+                       f"tailscale serve --http={args.tailnet_port} off")
+        raise RuntimeError(f"the tailnet forward did not start: {detail}")
+
+    cmd = ["dsh", "web", "--no-open", "--port", str(args.port)]
+    for host in trusted:
+        cmd += ["--trusted-host", host]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, bufsize=1)
+    return forward, proc
+
+
+def supervise(args):
+    """Detached: run everything, then own the idle timeout nothing else will."""
+    ip, host, trusted = resolve_host(args)
+    try:
+        forward, proc = start_processes(args, ip, trusted)
+    except RuntimeError as err:
+        write_state(error=str(err))
+        print(f"dsh-phone: {err}", file=sys.stderr)
+        return 1
+
+    write_state(supervisor=os.getpid(), dsh=proc.pid, socat=forward.pid,
+                host=host, cwd=os.getcwd(), started=time.time(),
+                port=args.port, tailnet_port=args.tailnet_port,
+                ttl_h=args.ttl, deadline=time.time() + args.ttl * 3600)
+
+    asked_to_stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: asked_to_stop.set())
+    signal.signal(signal.SIGINT, lambda *_: asked_to_stop.set())
+
+    # Read dsh's output on a thread so the main loop can watch the clock.
+    def reader():
+        announced = False
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            hit = URL_LINE.search(line)
+            if hit and not announced:
+                announced = True
+                url = f"http://{ip}:{args.tailnet_port}/?token={hit.group(2)}"
+                mid = None
+                if not args.no_telegram:
+                    try:
+                        mid = telegram_send(link_message(url, host, args.ttl))
+                    except Exception as err:
+                        print(f"telegram failed: {err}", file=sys.stderr)
+                write_state(url=url, telegram_mid=mid, telegram_sent=time.time())
+    threading.Thread(target=reader, daemon=True).start()
+
+    reason = "dsh exited"
+    while not asked_to_stop.wait(WATCH_INTERVAL_S):
+        if proc.poll() is not None:
+            break
+        state = read_state() or {}
+
+        # A live link must not sit in a chat log forever.
+        mid, sent = state.get("telegram_mid"), state.get("telegram_sent")
+        if mid and sent and time.time() - sent > TELEGRAM_TTL_S:
+            if telegram_delete(mid):
+                print(f"telegram message {mid} deleted", flush=True)
+            write_state(telegram_mid=None)
+
+        if args.ttl:
+            if browsers_attached(args.tailnet_port):
+                write_state(deadline=time.time() + args.ttl * 3600)
+            elif time.time() > state.get("deadline", 0):
+                reason = f"nothing attached for {args.ttl:g}h"
+                if not args.no_telegram:
+                    try:
+                        telegram_send(f"dsh web on {host} stopped: {reason}. "
+                                      f"Run dsh-phone again for a new link.")
+                    except Exception:
+                        pass
+                break
+    else:
+        reason = "asked to stop"
+
+    print(f"stopping: {reason}", flush=True)
+    proc.send_signal(signal.SIGINT)
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    forward.terminate()
+    state = read_state() or {}
+    if state.get("telegram_mid"):
+        telegram_delete(state["telegram_mid"])
+    STATE.unlink(missing_ok=True)
+    print("tailnet forward closed", flush=True)
+    return 0
+
+
+def run_foreground(args):
+    """The original behaviour: hold the terminal, stream the log, Ctrl-C to stop."""
+    ip, host, trusted = resolve_host(args)
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    try:
+        forward, proc = start_processes(args, ip, trusted)
+    except RuntimeError as err:
+        print(f"dsh-phone: {err}", file=sys.stderr)
+        return 1
+
+    announced = False
+    try:
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            hit = URL_LINE.search(line)
+            if hit and not announced:
+                announced = True
+                url = f"http://{ip}:{args.tailnet_port}/?token={hit.group(2)}"
+                print(f"\nphone: {url}\n", flush=True)
+                qr(url)
+                if not args.no_telegram:
+                    try:
+                        telegram_send(link_message(url, host, 0))
+                        print("link sent to Telegram", flush=True)
+                    except Exception as err:
+                        print(f"telegram failed: {err}", file=sys.stderr)
+        proc.wait()
+    except KeyboardInterrupt:
+        proc.send_signal(signal.SIGINT)
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    finally:
+        forward.terminate()
+        print("tailnet forward closed", flush=True)
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(add_help=True)
+    ap.add_argument("--port", type=int, default=3080,
+                    help="port dsh web listens on (default 3080)")
+    ap.add_argument("--tailnet-port", type=int, default=8080,
+                    help="port to answer on over the tailnet (default 8080)")
+    ap.add_argument("--ttl", type=float, default=6,
+                    help="stop after N hours with no browser attached; 0 never stops (default 6)")
+    ap.add_argument("--no-telegram", action="store_true", help="do not send the link to Telegram")
+    ap.add_argument("--foreground", action="store_true",
+                    help="hold the terminal instead of detaching")
+    ap.add_argument("--status", action="store_true",
+                    help="print the live link and how long is left")
+    ap.add_argument("-t", "--resend", action="store_true",
+                    help="with --status, re-send the link to Telegram")
+    ap.add_argument("--stop", action="store_true", help="stop dsh and close the forward")
+    ap.add_argument("--supervise", action="store_true", help=argparse.SUPPRESS)
+    args = ap.parse_args()
+
+    if args.status:
+        return do_status(args.resend)
+    if args.stop:
+        return do_stop()
+    if args.supervise:
+        return supervise(args)
+    if args.foreground:
+        return run_foreground(args)
+    return do_start_detached(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
