@@ -1,0 +1,39 @@
+diff --git a/lib/client.js b/lib/client.js
+index 3f0baed4d68aa7fce56c886b95722a2ed52272b6..8fe007e9bb8f0f7316445059d8b14e303df3ad57 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -57258,12 +57258,15 @@ window.__ModuleLoader__.load({
+ 			["[class*=\"detailsCol\"]", "data-pane=\"details\""]
+ 		];
+ 		/** Stable hooks consumed by the responsive compat layer (never text/hash selectors). */
++		/* LOCAL PATCH (pnpm patch, see profiles/web/patches/): the phone breakpoint is
++		   768px upstream. Set to 0px here so the pack's phone layout and drawer
++		   handler never match; dsh-client-ui-mobile lays out phones instead. */
+ 		const RESPONSIVE_CSS = `
+ [data-dsh-frame] { min-height: 0; }
+ [data-dsh-frame] [data-dsh-responsive-part="composer"],
+ [data-dsh-frame] [data-dsh-responsive-part="sidebar-toggle"],
+   [data-dsh-frame] [data-dsh-responsive-part="menu"] { touch-action: manipulation; }
+-@media (max-width: 768px) {
++@media (max-width: 0px) {
+   [data-dsh-frame] [data-dsh-responsive-part="sidebar-toggle"] { min-width: 44px; min-height: 44px; }
+   [data-dsh-frame] {
+     height: 100dvh;
+@@ -57400,7 +57403,7 @@ window.__ModuleLoader__.load({
+     max-width: min(92vw, 360px);
+   }
+ }
+-@media (max-width: 768px) {
++@media (max-width: 0px) {
+   [data-dsh-frame] [data-dsh-responsive-part="conversation-header"] {
+     display: grid;
+     grid-template-columns: minmax(0, 1fr) auto;
+@@ -57520,7 +57523,7 @@ window.__ModuleLoader__.load({
+ 			const onClick = (event) => {
+ 				const target = event.target;
+ 				if (!(target instanceof Element)) return;
+-				if (typeof window.matchMedia !== "function" || !window.matchMedia("(max-width: 768px)").matches) return;
++				if (typeof window.matchMedia !== "function" || !window.matchMedia("(max-width: 0px)").matches) return;
+ 				const sidebar = frame.querySelector("[data-pane=\"sidebar\"]");
+ 				const toggle = frame.querySelector("[data-dsh-responsive-part=\"sidebar-toggle\"]");
+ 				if (!frame.hasAttribute("data-sidebar-collapsed") && sidebar !== null && !sidebar.contains(target)) {

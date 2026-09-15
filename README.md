@@ -2,9 +2,8 @@
 
 A copy of one person's DeepSeek Harness (dsh) setup, with the personal parts removed, for a
 friend to reproduce on their own Linux machine. dsh is a coding agent you talk to in a
-browser; this setup adds a plugin set (one of them lays the page out for a phone), a local
-proxy so it runs on your own Claude or ChatGPT subscription, and a command that opens it on
-your phone over Tailscale.
+browser; this setup adds a plugin set, a phone layout, a local proxy so it runs on your own
+Claude or ChatGPT subscription, and a command that opens it on your phone over Tailscale.
 
 **This is a snapshot** of the setup on 2026-09-15. It does not track later changes to the
 original. Once installed, it is yours: change what you like.
@@ -33,7 +32,7 @@ or ChatGPT account in a browser, once to create a Telegram bot. Plan on about an
 
 | Folder | What it is |
 |---|---|
-| `dsh/` | dsh's home folder: model list and plugin profile |
+| `dsh/` | dsh's home folder: model list, plugin profile, phone layout plugin |
 | `cliproxyapi/` | config and service file for CLIProxyAPI, the local proxy |
 | `bin/` | `dsh-phone`, `dsh-model`, two helpers |
 | `skills/` | 18 skills the agent can invoke |

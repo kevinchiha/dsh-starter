@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: false
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@linxin666/dsh-web-all@0.3.22': 2e6120ac99933a86c3ae2b195fc2eff3e3f04a2d160bea5793c4977502de128d
+
 importers:
 
   .:
@@ -13,10 +16,13 @@ importers:
         version: git+https://github.com/dsh-external/dsh_workflow.git#44b83c182aa02d1be8a0803e8446cb495f93cd8f
       '@linxin666/dsh-web-all':
         specifier: 0.3.22
-        version: 0.3.22
+        version: 0.3.22(patch_hash=2e6120ac99933a86c3ae2b195fc2eff3e3f04a2d160bea5793c4977502de128d)
       dsh-better-sidebar:
         specifier: 0.19.1
         version: 0.19.1
+      dsh-client-ui-mobile:
+        specifier: link:../../plugins/dsh-client-ui-mobile
+        version: link:../../plugins/dsh-client-ui-mobile
       dsh-context:
         specifier: 0.52.0
         version: 0.52.0
@@ -1341,7 +1347,7 @@ snapshots:
     dependencies:
       schemastery: 3.18.0
 
-  '@linxin666/dsh-web-all@0.3.22':
+  '@linxin666/dsh-web-all@0.3.22(patch_hash=2e6120ac99933a86c3ae2b195fc2eff3e3f04a2d160bea5793c4977502de128d)':
     dependencies:
       '@linxin666/dsh-client-ui-community-plugins': 0.3.22
       '@linxin666/dsh-client-ui-git-graph': 0.3.22

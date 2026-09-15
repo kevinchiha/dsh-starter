@@ -180,6 +180,16 @@ cpu-features, ssh2), which takes a minute, then `composed-ok`. If it fails with
 `not found: make` or `Unable to detect compiler type`, the compiler package from step 2 is
 missing; install it and run the install again.
 
+Two things in that folder are easy to break later, so know they are there. The web pack
+(`@linxin666/dsh-web-all`) ships its own phone layout, hard-coded and with no switch, and
+it blanks the page next to the phone layout plugin in `dsh/plugins/`. So the pack is
+patched: `profiles/web/patches/` turns its phone breakpoint off, `pnpm-workspace.yaml`
+names the patch, and the version is pinned to `0.3.22`. Bumping the pack version makes
+`pnpm install` refuse until the patch is redone for the new version (`pnpm patch
+@linxin666/dsh-web-all@<new>`, change `768px` to `0px` in the three spots in
+`lib/client.js` where it appears, `pnpm patch-commit <path pnpm printed>`). If a later
+pack version adds a switch for its phone layout, drop the patch and use the switch instead.
+
 The credentials file holds the proxy key under the name `settings.yaml` refers to; never
 commit it anywhere.
 
@@ -314,7 +324,7 @@ Tick each one with the user:
 - [ ] `dsh web` answers a prompt on the default model
 - [ ] the Model list shows 11 Claude and 6 GPT entries (0 GPT if step 7 deleted the block; plus 4 DeepSeek rows that need their own key) and switching works
 - [ ] `dsh-model claude-sonnet-5` changes the default; `dsh-model claude-fable-5-1` puts it back
-- [ ] `dsh-phone` sends the link; on the phone the conversation fills the screen and the sidebar slides in from the left (the web pack's phone layout)
+- [ ] `dsh-phone` sends the link; on the phone the conversation fills the screen, a round hamburger sits top-left, and tapping it opens the sidebar as a drawer (the phone layout plugin)
 - [ ] the sidebar shows the task board and plugin manager, and no ssh panel
 - [ ] asking for `/grilling` on any idea starts the questioning
 - [ ] a subagent runs (ask "use a subagent to count the files in $STARTER")
@@ -332,7 +342,9 @@ the same ground. `dsh plugin --profile web add <name>` brings either back. The f
 picker come with dsh itself; they work only with a DeepSeek API key, which this guide does
 not set up. The ssh panel of the web pack is switched off in
 `dsh/profiles/web/cordis.patch.yml`; it is a remote-terminal feature this setup does not
-need, so its absence in the sidebar is correct.
+need, so its absence in the sidebar is correct. The pack's own phone layout is switched
+off too, by the patch step 7 describes; the phone layout in use is the plugin in
+`dsh/plugins/dsh-client-ui-mobile`.
 
 ## If something breaks
 

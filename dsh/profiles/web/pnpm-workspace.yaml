@@ -10,3 +10,10 @@ allowBuilds:
   cloudflared: true
   cpu-features: true
   ssh2: true
+# Turns the pack's built-in phone layout off (its 768px breakpoint becomes 0px,
+# three spots in lib/client.js) so dsh-client-ui-mobile lays out phones alone.
+# The two blank the page together. This is also why the pack version is pinned:
+# bumping it makes pnpm refuse to install until the patch is redone for the new
+# version (`pnpm patch <pkg>@<new>`, the same three edits, `pnpm patch-commit`).
+patchedDependencies:
+  '@linxin666/dsh-web-all@0.3.22': patches/@linxin666__dsh-web-all@0.3.22.patch
